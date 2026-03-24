@@ -7,12 +7,23 @@ from datetime import datetime, timedelta
 import pytz
 
 # ==============================
+# DEBUG DE AMBIENTE (RAILWAY)
+# ==============================
+print("🔍 Variáveis de ambiente disponíveis:")
+for key in os.environ:
+    print(f"{key} = {os.environ[key][:30]}")  # corta pra não vazar tudo
+
+# ==============================
 # TOKEN
 # ==============================
 TOKEN = os.getenv("TOKEN")
 
+print("🔑 TOKEN bruto:", TOKEN)
+
 if not TOKEN:
     print("❌ TOKEN não configurado!")
+    print("👉 Configure no Railway em:")
+    print("Service → Variables → TOKEN=seu_token")
     exit()
 else:
     print(f"✅ TOKEN carregado: {TOKEN[:10]}...")
@@ -55,7 +66,6 @@ lista_ativa = None
 participantes = {}
 mensagem_lista = None
 
-# 🔒 NOVO: controle anti-duplicação
 eventos_finalizados = set()
 ultimo_reset_dia = None
 
@@ -130,7 +140,7 @@ async def distribuir_pontos(canal_presenca, canal_pontos, nome):
     mensagem_lista = None
 
 # ==============================
-# SCHEDULER (ANTI DUPLICAÇÃO)
+# SCHEDULER
 # ==============================
 async def scheduler():
     global eventos_finalizados, ultimo_reset_dia, lista_ativa, participantes, mensagem_lista
@@ -152,7 +162,6 @@ async def scheduler():
 
         now = datetime.now(TIMEZONE)
 
-        # 🔄 Reset diário
         if ultimo_reset_dia != now.date():
             eventos_finalizados.clear()
             ultimo_reset_dia = now.date()
@@ -170,7 +179,6 @@ async def scheduler():
             abrir = evento - timedelta(minutes=5)
             fechar = evento + timedelta(minutes=10)
 
-            # ABRIR
             if abrir <= now <= abrir + timedelta(seconds=30):
                 if lista_ativa is None:
                     lista_ativa = nome
@@ -182,7 +190,6 @@ async def scheduler():
                         f"✍️ Envie seu nick no chat!"
                     )
 
-            # FECHAR (ANTI DUPLICADO)
             if fechar <= now <= fechar + timedelta(seconds=30):
                 if lista_ativa == nome and nome not in eventos_finalizados:
                     eventos_finalizados.add(nome)
