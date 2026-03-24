@@ -8,7 +8,7 @@ import pytz
 # ==============================
 # TOKEN
 # ==============================
-TOKEN = MTQ3Mjc1MTA1MjYyNDM2NzgwNA.Ggvagt.w4SFwRa9V-gRpkI4nkbtyOU_rPfvKhPu2GxX2A
+TOKEN = "MTQ3Mjc1MTA1MjYyNDM2NzgwNA.G3MFB_.rlwj0FFf14WnKWArk9gTFWagFXt7o6rIanwrYU"
 
 # ==============================
 # CONFIG
