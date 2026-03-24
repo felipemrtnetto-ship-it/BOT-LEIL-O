@@ -7,14 +7,21 @@ from datetime import datetime, timedelta
 import pytz
 
 # ==============================
-# CONFIG
+# TOKEN (CORRIGIDO PRA RAILWAY)
 # ==============================
-
 TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
-    raise ValueError("TOKEN não configurado nas variáveis do Railway")
+    print("❌ TOKEN não encontrado nas variáveis de ambiente!")
+    print("👉 No Railway configure exatamente assim:")
+    print("TOKEN=seu_token_aqui")
+    exit()
+else:
+    print(f"✅ TOKEN carregado: {TOKEN[:10]}...")
 
+# ==============================
+# CONFIG
+# ==============================
 PONTOS = 10
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 
@@ -50,7 +57,6 @@ lista_ativa = None
 participantes = {}
 mensagem_lista = None
 
-
 # ==============================
 # BANCO
 # ==============================
@@ -63,7 +69,6 @@ async def init_db():
         )
         """)
         await db.commit()
-
 
 # ==============================
 # DISTRIBUIR PONTOS
@@ -96,7 +101,6 @@ async def distribuir_pontos(canal_presenca, canal_pontos, nome):
         )
         ranking_geral = await cur.fetchall()
 
-    # Apagar mensagem da lista aberta
     if mensagem_lista:
         try:
             await mensagem_lista.delete()
@@ -125,7 +129,6 @@ async def distribuir_pontos(canal_presenca, canal_pontos, nome):
     lista_ativa = None
     mensagem_lista = None
 
-
 # ==============================
 # SCHEDULER
 # ==============================
@@ -142,6 +145,7 @@ async def scheduler():
         )
 
         if not canal_presenca or not canal_pontos:
+            print("⚠️ Canais não encontrados...")
             await asyncio.sleep(30)
             continue
 
@@ -152,7 +156,6 @@ async def scheduler():
             h, m = map(int, hora.split(":"))
             evento = now.replace(hour=h, minute=m, second=0, microsecond=0)
 
-            # Corrigir evento após meia-noite
             if evento < now - timedelta(minutes=15):
                 evento += timedelta(days=1)
 
@@ -176,7 +179,7 @@ async def scheduler():
                         f"✍️ Envie seu nick no chat!"
                     )
 
-                    print(f"Lista aberta: {nome}")
+                    print(f"✅ Lista aberta: {nome}")
 
             # FECHAR LISTA
             if fechar <= now <= fechar + timedelta(seconds=30):
@@ -185,9 +188,8 @@ async def scheduler():
 
         await asyncio.sleep(30)
 
-
 # ==============================
-# BLOQUEAR MENSAGENS + DUPLICADOS
+# MENSAGENS
 # ==============================
 @client.event
 async def on_message(message):
@@ -208,7 +210,6 @@ async def on_message(message):
 
     nick = message.content.strip().lower()
 
-    # validações
     if not nick or len(nick) > 15:
         try:
             await message.delete()
@@ -245,7 +246,6 @@ async def on_message(message):
         except:
             mensagem_lista = None
 
-
 # ==============================
 # READY
 # ==============================
@@ -253,7 +253,9 @@ async def on_message(message):
 async def on_ready():
     await init_db()
     asyncio.create_task(scheduler())
-    print("✅ Bot online!")
+    print("🚀 Bot online!")
 
-
+# ==============================
+# START
+# ==============================
 client.run(TOKEN)
