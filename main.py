@@ -4,17 +4,14 @@ import aiosqlite
 import asyncio
 from datetime import datetime, timedelta
 import pytz
-from dotenv import load_dotenv
 
 # ==============================
-# CARREGAR .ENV
+# TOKEN (Railway - variável segura)
 # ==============================
-load_dotenv()
-
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 if not TOKEN:
-    raise Exception("❌ TOKEN não encontrado! Verifique o arquivo .env")
+    raise Exception("❌ DISCORD_TOKEN não encontrado no Railway!")
 
 # ==============================
 # CONFIG
@@ -42,7 +39,7 @@ eventos = [
     ("Zorlak", "01:10", None),
 ]
 
-DB_PATH = "ranking.db"
+DB_PATH = "/tmp/ranking.db"  # mais seguro no Railway
 
 intents = discord.Intents.default()
 intents.message_content = True
