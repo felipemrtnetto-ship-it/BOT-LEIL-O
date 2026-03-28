@@ -10,11 +10,10 @@ import pytz
 # LOAD ENV
 # ==============================
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-print("TOKEN:", TOKEN)
+TOKEN = os.environ.get("DISCORD_TOKEN")
 
 if not TOKEN:
-    raise Exception("❌ TOKEN não encontrado!")
+    raise Exception("❌ DISCORD_TOKEN não configurado no ambiente!")
 
 # ==============================
 # CONFIG
