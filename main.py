@@ -28,7 +28,7 @@ DB_PATH = "ranking.db"
 
 # Lista de eventos: (Nome, Hora, Dias[None=Todos], Pontos, Emoji)
 eventos = [
-    ("Galia Black", "21:35", None, 2, "🗡️"),
+    ("Galia Black", "11:35", None, 2, "🗡️"),
     ("Kundun", "13:10", None, 2, "🐲"),
     ("Kundun", "15:10", None, 2, "🐲"),
     ("Galia Black", "16:45", None, 2, "🗡️"),
