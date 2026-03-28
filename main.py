@@ -11,6 +11,7 @@ import pytz
 # ==============================
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+print("TOKEN:", TOKEN)
 
 if not TOKEN:
     raise Exception("❌ TOKEN não encontrado!")
