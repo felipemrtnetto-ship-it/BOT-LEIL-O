@@ -7,23 +7,32 @@ from datetime import datetime, timedelta
 import pytz
 
 # ==============================
+# CARREGAMENTO DE TOKEN (FIX RAILWAY)
+# ==============================
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
 
-TOKEN = os.getenv("TOKEN")  # ✅ CORRIGIDO AQUI
+print("--- DEBUG SISTEMA ---")
+if not TOKEN:
+    print("❌ ERRO: O TOKEN não foi detectado no ambiente do Railway!")
+    print("Verifique a aba 'Variables' no painel do Railway.")
+else:
+    # Mostra apenas os 4 primeiros caracteres por segurança
+    print(f"✅ Token detectado (Inicia com: {TOKEN[:4]}...)")
+print("---------------------")
 
 if not TOKEN:
     raise Exception("❌ TOKEN não configurado no ambiente!")
 
 # ==============================
-# CONFIG
+# CONFIGURAÇÕES
 # ==============================
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
-
 CANAL_PRESENCA_ID = 1423485053127753748
 CANAL_PONTOS_ID = 1423485889010602076
+DB_PATH = "ranking.db"
 
-# ==============================
-# EVENTOS
-# ==============================
+# Lista de Eventos
 eventos = [
     ("Galia Black", "21:35", None, 2, "🗡️"),
     ("Kundun", "13:10", None, 2, "🐲"),
@@ -42,17 +51,16 @@ eventos = [
     ("Castle Siege", "21:10", [6], 50, "🛡️"),
 ]
 
-DB_PATH = "ranking.db"
-
+# Inicialização do Bot
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
+# Variáveis de Controle
 lista_ativa = None
 participantes = {}
 usuarios_registrados = set()
 mensagem_lista = None
-
 evento_aberto_id = None
 evento_fechado_id = None
 
@@ -68,62 +76,55 @@ async def init_db():
         )
         """)
         await db.commit()
+    print("🗄️ Banco de dados verificado.")
 
 # ==============================
 # FINALIZAR EVENTO
 # ==============================
 async def distribuir_pontos(canal_presenca, canal_pontos, nome, pontos, emoji):
-    global participantes, lista_ativa, mensagem_lista
+    global participantes, lista_ativa, mensagem_lista, usuarios_registrados
 
     lista_final = list(participantes.values())
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        for nick in lista_final:
-            cur = await db.execute("SELECT pontos FROM ranking WHERE nick=?", (nick,))
-            row = await cur.fetchone()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            for nick in lista_final:
+                cur = await db.execute("SELECT pontos FROM ranking WHERE nick=?", (nick,))
+                row = await cur.fetchone()
 
-            if row:
-                await db.execute(
-                    "UPDATE ranking SET pontos = pontos + ? WHERE nick=?",
-                    (pontos, nick),
-                )
-            else:
-                await db.execute(
-                    "INSERT INTO ranking (nick, pontos) VALUES (?,?)",
-                    (nick, pontos),
-                )
+                if row:
+                    await db.execute("UPDATE ranking SET pontos = pontos + ? WHERE nick=?", (pontos, nick))
+                else:
+                    await db.execute("INSERT INTO ranking (nick, pontos) VALUES (?,?)", (nick, pontos))
+            await db.commit()
 
-        await db.commit()
+            cur = await db.execute("SELECT nick, pontos FROM ranking ORDER BY pontos DESC LIMIT 10")
+            ranking_geral = await cur.fetchall()
 
-        cur = await db.execute(
-            "SELECT nick, pontos FROM ranking ORDER BY pontos DESC LIMIT 10"
+        if mensagem_lista:
+            try: await mensagem_lista.delete()
+            except: pass
+
+        lista_txt = "\n".join([f"{i+1}. {n}" for i, n in enumerate(lista_final)])
+        await canal_presenca.send(
+            f"🔒 **Lista fechada!**\n\n"
+            f"{emoji} **{nome} FINALIZADO**\n\n"
+            f"👥 Participantes:\n"
+            f"{lista_txt if lista_txt else 'Nenhum participante.'}"
         )
-        ranking_geral = await cur.fetchall()
 
-    if mensagem_lista:
-        try:
-            await mensagem_lista.delete()
-        except:
-            pass
+        msg = "🏆 **RANKING GERAL – BOSSES**\n\n"
+        for i, (nick, pts) in enumerate(ranking_geral, 1):
+            msg += f"{i}. {nick} — {pts} pts\n"
+        await canal_pontos.send(msg)
 
-    lista_txt = "\n".join([f"{i+1}. {n}" for i, n in enumerate(lista_final)])
-
-    await canal_presenca.send(
-        f"🔒 **Lista fechada!**\n\n"
-        f"{emoji} **{nome} FINALIZADO**\n\n"
-        f"👥 Participantes:\n"
-        f"{lista_txt if lista_txt else 'Nenhum participante.'}"
-    )
-
-    msg = "🏆 **RANKING GERAL – BOSSES**\n\n"
-    for i, (nick, pts) in enumerate(ranking_geral, 1):
-        msg += f"{i}. {nick} — {pts} pts\n"
-
-    await canal_pontos.send(msg)
-
-    participantes = {}
-    lista_ativa = None
-    mensagem_lista = None
+    except Exception as e:
+        print(f"Erro ao salvar no DB: {e}")
+    finally:
+        participantes = {}
+        usuarios_registrados = set()
+        lista_ativa = None
+        mensagem_lista = None
 
 # ==============================
 # SCHEDULER
@@ -133,110 +134,114 @@ async def scheduler():
     global evento_aberto_id, evento_fechado_id, usuarios_registrados
 
     await client.wait_until_ready()
+    print("⏰ Scheduler iniciado.")
 
-    while True:
-        canal_presenca = client.get_channel(CANAL_PRESENCA_ID)
-        canal_pontos = client.get_channel(CANAL_PONTOS_ID)
-
-        now = datetime.now(TIMEZONE)
-
-        for nome, hora, dias, pontos, emoji in eventos:
-
-            h, m = map(int, hora.split(":"))
-            evento = now.replace(hour=h, minute=m, second=0, microsecond=0)
-
-            if evento < now:
-                evento += timedelta(days=1)
-
-            if dias and now.weekday() not in dias:
+    while not client.is_closed():
+        try:
+            canal_presenca = client.get_channel(CANAL_PRESENCA_ID)
+            canal_pontos = client.get_channel(CANAL_PONTOS_ID)
+            
+            if not canal_presenca:
+                await asyncio.sleep(10)
                 continue
 
-            evento_id = f"{nome}-{evento.date()}"
+            now = datetime.now(TIMEZONE)
 
-            abrir = evento - timedelta(minutes=5)
-            fechar = evento + timedelta(minutes=10)
+            for nome, hora, dias, pontos, emoji in eventos:
+                h, m = map(int, hora.split(":"))
+                evento = now.replace(hour=h, minute=m, second=0, microsecond=0)
 
-            if abrir <= now <= abrir + timedelta(seconds=20):
-                if lista_ativa is None and evento_aberto_id != evento_id:
+                if evento < now:
+                    evento += timedelta(days=1)
 
-                    lista_ativa = nome
-                    participantes = {}
-                    usuarios_registrados = set()
-                    evento_aberto_id = evento_id
+                if dias and now.weekday() not in dias:
+                    continue
 
-                    mensagem_lista = await canal_presenca.send(
-                        f"{emoji} **LISTA ABERTA — {nome}**\n\n"
-                        f"👥 Participantes: 0\n\n"
-                        f"✍️ Envie seu nick!"
-                    )
+                evento_id = f"{nome}-{evento.date()}"
+                abrir = evento - timedelta(minutes=5)
+                fechar = evento + timedelta(minutes=10)
 
-            if fechar <= now <= fechar + timedelta(seconds=20):
-                if lista_ativa == nome and evento_fechado_id != evento_id:
-                    evento_fechado_id = evento_id
-                    await distribuir_pontos(canal_presenca, canal_pontos, nome, pontos, emoji)
+                # Abrir Lista
+                if abrir <= now <= abrir + timedelta(seconds=40):
+                    if lista_ativa is None and evento_aberto_id != evento_id:
+                        lista_ativa = nome
+                        participantes = {}
+                        usuarios_registrados = set()
+                        evento_aberto_id = evento_id
+                        mensagem_lista = await canal_presenca.send(
+                            f"{emoji} **LISTA ABERTA — {nome}**\n\n"
+                            f"👥 Participantes: 0\n\n"
+                            f"✍️ Envie seu nick no chat!"
+                        )
 
-        await asyncio.sleep(20)
+                # Fechar Lista
+                if fechar <= now <= fechar + timedelta(seconds=40):
+                    if lista_ativa == nome and evento_fechado_id != evento_id:
+                        evento_fechado_id = evento_id
+                        await distribuir_pontos(canal_presenca, canal_pontos, nome, pontos, emoji)
+
+        except Exception as e:
+            print(f"Erro no loop do scheduler: {e}")
+        
+        await asyncio.sleep(30)
 
 # ==============================
-# CAPTURA NICK
+# EVENTOS DISCORD
 # ==============================
 @client.event
 async def on_message(message):
     global participantes, mensagem_lista, usuarios_registrados
 
-    if message.author.bot:
-        return
-
-    if message.channel.id != CANAL_PRESENCA_ID:
+    if message.author.bot or message.channel.id != CANAL_PRESENCA_ID:
         return
 
     if not lista_ativa:
-        try:
-            await message.delete()
-        except:
-            pass
+        try: await message.delete()
+        except: pass
         return
 
     if message.author.id in usuarios_registrados:
-        try:
-            await message.delete()
-        except:
-            pass
+        try: await message.delete()
+        except: pass
         return
 
     nick = message.content.strip()
-    if not nick:
+    if not nick or len(nick) > 30: # Proteção contra spam
         return
 
     usuarios_registrados.add(message.author.id)
     participantes[message.author.id] = nick
 
-    try:
-        await message.delete()
-    except:
-        pass
+    try: await message.delete()
+    except: pass
 
     if mensagem_lista:
         lista_txt = "\n".join([f"• {n}" for n in participantes.values()])
-
-        await mensagem_lista.edit(
-            content=(
-                f"📋 **LISTA ABERTA — {lista_ativa}**\n\n"
-                f"👥 Participantes: {len(participantes)}\n\n"
-                f"{lista_txt}"
+        try:
+            await mensagem_lista.edit(
+                content=(
+                    f"📋 **LISTA ABERTA — {lista_ativa}**\n\n"
+                    f"👥 Participantes: {len(participantes)}\n\n"
+                    f"{lista_txt}"
+                )
             )
-        )
+        except Exception as e:
+            print(f"Erro ao editar lista: {e}")
 
-# ==============================
-# READY
-# ==============================
 @client.event
 async def on_ready():
     await init_db()
-    asyncio.create_task(scheduler())
     print(f"🚀 Bot online como {client.user}")
+    
+    # Garante que o scheduler só inicie uma vez
+    if not hasattr(client, 'scheduler_running'):
+        client.scheduler_running = True
+        asyncio.create_task(scheduler())
 
 # ==============================
 # START
 # ==============================
-client.run(TOKEN)
+try:
+    client.run(TOKEN)
+except Exception as e:
+    print(f"❌ Erro ao iniciar o bot: {e}")
