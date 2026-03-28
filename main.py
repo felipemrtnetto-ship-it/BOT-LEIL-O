@@ -10,10 +10,11 @@ import pytz
 # LOAD ENV
 # ==============================
 load_dotenv()
-TOKEN = os.environ.get("DISCORD_TOKEN")
+
+TOKEN = os.getenv("TOKEN")  # ✅ CORRIGIDO AQUI
 
 if not TOKEN:
-    raise Exception("❌ DISCORD_TOKEN não configurado no ambiente!")
+    raise Exception("❌ TOKEN não configurado no ambiente!")
 
 # ==============================
 # CONFIG
@@ -24,7 +25,7 @@ CANAL_PRESENCA_ID = 1423485053127753748
 CANAL_PONTOS_ID = 1423485889010602076
 
 # ==============================
-# EVENTOS (AGORA COM PONTOS + EMOJI)
+# EVENTOS
 # ==============================
 eventos = [
     ("Galia Black", "21:35", None, 2, "🗡️"),
@@ -41,8 +42,6 @@ eventos = [
     ("Balgass", "23:00", [2, 5], 30, "🧌"),
     ("Yorm", "23:40", None, 15, "🐗"),
     ("Zorlak", "01:10", None, 15, "🐉"),
-
-    # 🛡️ CASTLE SIEGE (DOMINGO = 6)
     ("Castle Siege", "21:10", [6], 50, "🛡️"),
 ]
 
@@ -160,11 +159,8 @@ async def scheduler():
             abrir = evento - timedelta(minutes=5)
             fechar = evento + timedelta(minutes=10)
 
-            # ABRIR
             if abrir <= now <= abrir + timedelta(seconds=20):
                 if lista_ativa is None and evento_aberto_id != evento_id:
-
-                    print(f"🟢 Abrindo: {nome}")
 
                     lista_ativa = nome
                     participantes = {}
@@ -177,12 +173,8 @@ async def scheduler():
                         f"✍️ Envie seu nick!"
                     )
 
-            # FECHAR
             if fechar <= now <= fechar + timedelta(seconds=20):
                 if lista_ativa == nome and evento_fechado_id != evento_id:
-
-                    print(f"🔴 Fechando: {nome}")
-
                     evento_fechado_id = evento_id
                     await distribuir_pontos(canal_presenca, canal_pontos, nome, pontos, emoji)
 
