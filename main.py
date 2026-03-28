@@ -12,7 +12,7 @@ import pytz
 load_dotenv()
 
 # Tenta carregar de todas as formas possíveis
-TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
+TOKEN = (os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN") or "").strip()
 
 print("\n--- 🕵️ RELATÓRIO DE INICIALIZAÇÃO ---")
 # Lista as chaves para sabermos se o Railway injetou algo
