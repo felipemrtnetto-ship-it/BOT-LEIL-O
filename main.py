@@ -14,18 +14,18 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Correção automática de protocolo para o Railway/Asyncpg
+# Ajuste de URL para o asyncpg (Railway)
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 
-# IDs DOS CANAIS FORNECIDOS
+# IDs DOS CANAIS
 CANAL_PRESENCA_ID = 1423485053127753748
 CANAL_PONTOS_ID = 1423485889010602076
 CANAL_LOGS_ID = 1489805148204040312
 
-# Tabela de Horários (Nome, Hora do Boss, Dias [None=Todos], Pontos, Emoji)
+# Tabela de Horários: (Nome, Hora do Boss, Dias [None=Todos], Pontos, Emoji)
 eventos = [
     ("Galia Black", "10:45", None, 2, "🗡️"),
     ("Kundun", "13:10", None, 2, "🐲"),
@@ -45,7 +45,7 @@ eventos = [
 ]
 
 # ==============================
-# 🗄️ BANCO DE DADOS (POSTGRES)
+# 🗄️ BANCO DE DADOS
 # ==============================
 async def init_db():
     try:
@@ -58,35 +58,32 @@ async def init_db():
             )
         ''')
         await conn.close()
-        print("✅ Banco de Dados conectado e pronto!")
+        print("✅ Banco de Dados conectado!")
     except Exception as e:
-        print(f"❌ Erro Crítico no Banco: {e}")
+        print(f"❌ Erro no Banco: {e}")
 
 # ==============================
-# 🔘 INTERFACE (SISTEMA DE BOTÃO)
+# 🔘 INTERFACE (BOTÃO)
 # ==============================
 class PresencaView(View):
     def __init__(self, bot):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="Marcar Presença", style=discord.ButtonStyle.green, custom_id="btn_pres_v2", emoji="✅")
+    @discord.ui.button(label="Marcar Presença", style=discord.ButtonStyle.green, custom_id="btn_pres_v3", emoji="✅")
     async def marcar_presenca(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.bot.lista_ativa:
-            return await interaction.response.send_message("❌ Nenhuma lista aberta no momento!", ephemeral=True)
+            return await interaction.response.send_message("❌ Nenhuma lista aberta!", ephemeral=True)
         
-        user_id = interaction.user.id
-        nick = interaction.user.display_name
-
-        if user_id in self.bot.participantes:
+        if interaction.user.id in self.bot.participantes:
             return await interaction.response.send_message("⚠️ Você já está na lista!", ephemeral=True)
 
-        self.bot.participantes[user_id] = nick
+        self.bot.participantes[interaction.user.id] = interaction.user.display_name
         await self.bot.atualizar_lista_msg()
-        await interaction.response.send_message(f"✅ Presença confirmada como **{nick}**!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Confirmado!", ephemeral=True)
 
 # ==============================
-# 🤖 CLASSE PRINCIPAL DO BOT
+# 🤖 CLASSE DO BOT
 # ==============================
 class MaratonaBot(discord.Client):
     def __init__(self):
@@ -103,15 +100,21 @@ class MaratonaBot(discord.Client):
     async def log_auditoria(self, titulo, desc, cor=0x3498db):
         canal = self.get_channel(CANAL_LOGS_ID)
         if canal:
-            embed = discord.Embed(title=titulo, description=desc, color=cor, timestamp=datetime.now(TIMEZONE))
-            await canal.send(embed=embed)
+            try:
+                embed = discord.Embed(title=titulo, description=desc, color=cor, timestamp=datetime.now(TIMEZONE))
+                await canal.send(embed=embed)
+                print(f"DEBUG: Log enviado para {CANAL_LOGS_ID}")
+            except Exception as e:
+                print(f"DEBUG: Erro ao enviar log: {e}")
+        else:
+            print(f"DEBUG: Canal de log {CANAL_LOGS_ID} não encontrado.")
 
     async def atualizar_lista_msg(self):
         if self.mensagem_lista:
             txt = "\n".join([f"• {n}" for n in self.participantes.values()])
             embed = discord.Embed(
                 title=f"📋 LISTA: {self.lista_ativa}",
-                description=f"Clique no botão abaixo para participar!\n\n**Participantes ({len(self.participantes)}):**\n{txt}",
+                description=f"**Participantes ({len(self.participantes)}):**\n{txt}",
                 color=0x2ecc71
             )
             try:
@@ -121,7 +124,7 @@ class MaratonaBot(discord.Client):
 
     async def distribuir_pontos(self, nome, pts):
         if not self.participantes:
-            await self.log_auditoria("⚠️ Lista Vazia", f"O evento **{nome}** encerrou sem participantes.", 0xe67e22)
+            await self.log_auditoria("⚠️ Lista Vazia", f"Evento **{nome}** sem participantes.", 0xe67e22)
             self.lista_ativa = None
             return
 
@@ -134,20 +137,20 @@ class MaratonaBot(discord.Client):
                 ''', uid, nick, pts)
             await conn.close()
             
-            await self.log_auditoria("💰 Pontos Pagos", f"Evento: {nome}\nPlayers: {len(self.participantes)}", 0x27ae60)
+            await self.log_auditoria("💰 Pontos Pagos", f"Evento: {nome}\nParticipantes: {len(self.participantes)}", 0x27ae60)
             
             canal_pts = self.get_channel(CANAL_PONTOS_ID)
             if canal_pts:
-                await canal_pts.send(f"✅ **{nome}** finalizado! **{len(self.participantes)}** jogadores ganharam **{pts}** pontos.")
+                await canal_pts.send(f"✅ **{nome}** finalizado! **{len(self.participantes)}** jogadores ganharam **{pts}** pts.")
         except Exception as e:
-            print(f"Erro no pagamento: {e}")
+            print(f"Erro ao pagar: {e}")
         finally:
             self.participantes = {}
             self.lista_ativa = None
 
     async def scheduler(self):
         await self.wait_until_ready()
-        print("⏰ Agendador de eventos iniciado.")
+        print("⏰ Scheduler Ativo.")
         while not self.is_closed():
             try:
                 now = datetime.now(TIMEZONE)
@@ -165,72 +168,66 @@ class MaratonaBot(discord.Client):
                     if hora_atual == t_abrir and self.lista_ativa != nome:
                         self.lista_ativa = nome
                         self.participantes = {}
-                        emb = discord.Embed(title=f"{emoji} LISTA ABERTA: {nome}", description="Clique no botão abaixo!", color=0x00FF00)
+                        emb = discord.Embed(title=f"{emoji} LISTA ABERTA: {nome}", color=0x00FF00)
+                        emb.description = "Clique no botão abaixo para participar!"
                         self.mensagem_lista = await canal_pres.send(content="@everyone", embed=emb, view=PresencaView(self))
+                        await self.log_auditoria("🔔 Lista Aberta", f"Evento: {nome}", 0x00FF00)
 
                     if hora_atual == t_fechar and self.lista_ativa == nome:
                         await self.distribuir_pontos(nome, pts)
             except Exception as e:
-                print(f"Erro no scheduler: {e}")
+                print(f"Erro loop: {e}")
             await asyncio.sleep(30)
 
 # ==============================
-# 🎮 COMANDOS DE MENSAGEM
+# 🎮 COMANDOS
 # ==============================
 client = MaratonaBot()
 
 @client.event
 async def on_ready():
-    print(f"🚀 {client.user} está ONLINE e monitorando os bosses!")
+    print(f"🚀 {client.user} ONLINE!")
 
 @client.event
 async def on_message(message):
     if message.author.bot: return
 
-    # COMANDOS DE ADMINISTRADOR
+    # COMANDOS ADM
     if message.author.guild_permissions.administrator:
-        # Adicionar pontos manualmente: !addpontos @usuario 10
         if message.content.startswith("!addpontos"):
             try:
                 parts = message.content.split()
                 user = message.mentions[0]
                 qtd = int(parts[2])
                 conn = await asyncpg.connect(DATABASE_URL)
-                await conn.execute('''
-                    INSERT INTO ranking (user_id, nick, pontos) VALUES ($1, $2, $3)
-                    ON CONFLICT (user_id) DO UPDATE SET pontos = ranking.pontos + $3, nick = $2
-                ''', user.id, user.display_name, qtd)
+                await conn.execute('INSERT INTO ranking (user_id, nick, pontos) VALUES ($1,$2,$3) ON CONFLICT(user_id) DO UPDATE SET pontos=ranking.pontos+$3', user.id, user.display_name, qtd)
                 await conn.close()
-                await message.channel.send(f"✅ Adicionado **{qtd} pts** para {user.mention}.")
+                await message.channel.send(f"✅ Adicionado {qtd} pts para {user.mention}!")
+                await client.log_auditoria("✍️ Ponto Manual", f"ADM {message.author} deu {qtd} pts para {user.display_name}")
             except:
-                await message.channel.send("❌ Erro. Use: `!addpontos @usuario 10`")
+                await message.channel.send("Use: `!addpontos @usuario 10`")
 
-        # Zerar o ranking completo
         if message.content == "!zerar_ranking":
             conn = await asyncpg.connect(DATABASE_URL)
             await conn.execute("DELETE FROM ranking")
             await conn.close()
-            await message.channel.send("⚠️ **RANKING GERAL FOI RESETADO!**")
+            await message.channel.send("⚠️ **RANKING RESETADO!**")
+            await client.log_auditoria("🗑️ Reset", f"O ranking foi zerado por {message.author}", 0xff0000)
 
-        # Testar a lista manualmente
         if message.content == "!testar":
             canal = client.get_channel(CANAL_PRESENCA_ID)
-            client.lista_ativa = "Teste de Sistema"
+            client.lista_ativa = "Teste Manual"
             client.participantes = {}
-            emb = discord.Embed(title="🧪 TESTE DE BOTÃO", description="Clique abaixo para testar o banco!", color=0x00FFFF)
+            emb = discord.Embed(title="🧪 TESTE", description="Clique no botão!", color=0x00FFFF)
             client.mensagem_lista = await canal.send(embed=emb, view=PresencaView(client))
 
-    # COMANDO PÚBLICO (RANKING)
+    # COMANDO PÚBLICO
     if message.content == "!ranking":
-        try:
-            conn = await asyncpg.connect(DATABASE_URL)
-            rows = await conn.fetch("SELECT nick, pontos FROM ranking ORDER BY pontos DESC LIMIT 20")
-            await conn.close()
-            emb = discord.Embed(title="🏆 RANKING DA MARATONA", color=0xFFD700)
-            txt = "\n".join([f"**{i+1}º** {r['nick']} — `{r['pontos']} pts`" for i, r in enumerate(rows)]) if rows else "Ninguém pontuou ainda."
-            emb.description = txt
-            await message.channel.send(embed=emb)
-        except Exception as e:
-            await message.channel.send(f"Erro ao carregar ranking: {e}")
+        conn = await asyncpg.connect(DATABASE_URL)
+        rows = await conn.fetch("SELECT nick, pontos FROM ranking ORDER BY pontos DESC LIMIT 20")
+        await conn.close()
+        emb = discord.Embed(title="🏆 RANKING ATUAL", color=0xFFD700)
+        emb.description = "\n".join([f"**{i+1}º** {r['nick']} — `{r['pontos']} pts`" for i, r in enumerate(rows)]) if rows else "Vazio"
+        await message.channel.send(embed=emb)
 
 client.run(TOKEN)
