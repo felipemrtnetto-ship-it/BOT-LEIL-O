@@ -20,7 +20,7 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
 
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 
-# IDs DOS CANAIS (VERIFIQUE SE ESTÃO CORRETOS NO SEU DISCORD)
+# IDs DOS CANAIS (VERIFIQUE SE ESTÃO CORRETOS)
 CANAL_PRESENCA_ID = 1423485053127753748
 CANAL_PONTOS_ID = 1423485889010602076
 CANAL_LOGS_ID = 1489805148204040312
@@ -58,9 +58,9 @@ async def init_db():
             )
         ''')
         await conn.close()
-        print("✅ Banco de Dados conectado e pronto!")
+        print("✅ Banco de Dados conectado!")
     except Exception as e:
-        print(f"❌ Erro Crítico no Banco: {e}")
+        print(f"❌ Erro no Banco: {e}")
 
 # ==============================
 # 🔘 INTERFACE (BOTÃO)
@@ -70,10 +70,10 @@ class PresencaView(View):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="Marcar Presença", style=discord.ButtonStyle.green, custom_id="btn_presenca_v2", emoji="✅")
+    @discord.ui.button(label="Marcar Presença", style=discord.ButtonStyle.green, custom_id="btn_pres_v2", emoji="✅")
     async def marcar_presenca(self, interaction: discord.Interaction):
         if not self.bot.lista_ativa:
-            return await interaction.response.send_message("❌ Nenhuma lista aberta no momento!", ephemeral=True)
+            return await interaction.response.send_message("❌ Nenhuma lista aberta!", ephemeral=True)
         
         user_id = interaction.user.id
         nick = interaction.user.display_name
@@ -83,7 +83,7 @@ class PresencaView(View):
 
         self.bot.participantes[user_id] = nick
         await self.bot.atualizar_lista_msg()
-        await interaction.response.send_message(f"✅ Presença confirmada como **{nick}**!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Confirmado: **{nick}**", ephemeral=True)
 
 # ==============================
 # 🤖 CLASSE DO BOT
@@ -103,4 +103,92 @@ class MaratonaBot(discord.Client):
     async def log_auditoria(self, titulo, desc, cor=0x3498db):
         canal = self.get_channel(CANAL_LOGS_ID)
         if canal:
+            embed = discord.Embed(title=titulo, description=desc, color=cor, timestamp=datetime.now(TIMEZONE))
+            await canal.send(embed=embed)
+
+    async def atualizar_lista_msg(self):
+        if self.mensagem_lista:
+            txt = "\n".join([f"• {n}" for n in self.participantes.values()])
+            # CORREÇÃO AQUI (Linha 106):
             embed = discord.Embed(
+                title=f"📋 LISTA: {self.lista_ativa}",
+                description=f"Clique no botão abaixo!\n\n**Participantes ({len(self.participantes)}):**\n{txt}",
+                color=0x2ecc71
+            )
+            try:
+                await self.mensagem_lista.edit(embed=embed, view=PresencaView(self))
+            except Exception:
+                pass
+
+    async def distribuir_pontos(self, nome, pts):
+        if not self.participantes:
+            await self.log_auditoria("⚠️ Lista Vazia", f"Evento **{nome}** sem ninguém.", 0xe67e22)
+            self.lista_ativa = None
+            return
+
+        try:
+            conn = await asyncpg.connect(DATABASE_URL)
+            for uid, nick in self.participantes.items():
+                await conn.execute('''
+                    INSERT INTO ranking (user_id, nick, pontos) VALUES ($1, $2, $3)
+                    ON CONFLICT (user_id) DO UPDATE SET pontos = ranking.pontos + $3, nick = $2
+                ''', uid, nick, pts)
+            await conn.close()
+            
+            await self.log_auditoria("💰 Pontos Pagos", f"Evento: {nome}\nPlayers: {len(self.participantes)}", 0x27ae60)
+            canal_pts = self.get_channel(CANAL_PONTOS_ID)
+            if canal_pts:
+                await canal_pts.send(f"✅ **{nome}** finalizado! **{len(self.participantes)}** players ganharam **{pts}** pts.")
+        except Exception as e:
+            print(f"Erro ao pagar: {e}")
+        finally:
+            self.participantes = {}
+            self.lista_ativa = None
+
+    async def scheduler(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                now = datetime.now(TIMEZONE)
+                hora_atual = now.strftime("%H:%M")
+                canal_pres = self.get_channel(CANAL_PRESENCA_ID)
+
+                for nome, h_boss, dias, pts, emoji in eventos:
+                    if dias and now.weekday() not in dias: continue
+                    
+                    h, m = map(int, h_boss.split(":"))
+                    dt_boss = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                    t_abrir = (dt_boss - timedelta(minutes=5)).strftime("%H:%M")
+                    t_fechar = (dt_boss + timedelta(minutes=10)).strftime("%H:%M")
+
+                    if hora_atual == t_abrir and self.lista_ativa != nome:
+                        self.lista_ativa = nome
+                        self.participantes = {}
+                        emb = discord.Embed(title=f"{emoji} LISTA ABERTA: {nome}", description="Clique no botão!", color=0x00FF00)
+                        self.mensagem_lista = await canal_pres.send(content="@everyone", embed=emb, view=PresencaView(self))
+
+                    if hora_atual == t_fechar and self.lista_ativa == nome:
+                        await self.distribuir_pontos(nome, pts)
+            except Exception as e:
+                print(f"Erro loop: {e}")
+            await asyncio.sleep(30)
+
+# ==============================
+# 🎮 EXECUÇÃO
+# ==============================
+client = MaratonaBot()
+
+@client.event
+async def on_ready():
+    print(f"🚀 {client.user} ONLINE!")
+
+@client.event
+async def on_message(message):
+    if message.author.bot: return
+
+    if message.content == "!testar" and message.author.guild_permissions.administrator:
+        canal = client.get_channel(CANAL_PRESENCA_ID)
+        client.lista_ativa = "Teste Manual"
+        client.participantes = {}
+        emb = discord.Embed(title="🧪 TESTE", description="Clique no botão!", color=0x00FFFF)
+        client.mensagem_lista = await canal.send(embed=
