@@ -14,18 +14,15 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Correção de esquema para o asyncpg
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 
-# IDs DOS CANAIS (VERIFIQUE SE ESTÃO CORRETOS)
 CANAL_PRESENCA_ID = 1423485053127753748
 CANAL_PONTOS_ID = 1423485889010602076
 CANAL_LOGS_ID = 1489805148204040312
 
-# Lista de Eventos: (Nome, Hora do Boss, Dias [None=Todos], Pontos, Emoji)
 eventos = [
     ("Galia Black", "10:45", None, 2, "🗡️"),
     ("Kundun", "13:10", None, 2, "🐲"),
@@ -45,7 +42,7 @@ eventos = [
 ]
 
 # ==============================
-# 🗄️ BANCO DE DADOS (POSTGRES)
+# 🗄️ BANCO DE DADOS
 # ==============================
 async def init_db():
     try:
@@ -109,7 +106,6 @@ class MaratonaBot(discord.Client):
     async def atualizar_lista_msg(self):
         if self.mensagem_lista:
             txt = "\n".join([f"• {n}" for n in self.participantes.values()])
-            # CORREÇÃO AQUI (Linha 106):
             embed = discord.Embed(
                 title=f"📋 LISTA: {self.lista_ativa}",
                 description=f"Clique no botão abaixo!\n\n**Participantes ({len(self.participantes)}):**\n{txt}",
@@ -117,7 +113,7 @@ class MaratonaBot(discord.Client):
             )
             try:
                 await self.mensagem_lista.edit(embed=embed, view=PresencaView(self))
-            except Exception:
+            except:
                 pass
 
     async def distribuir_pontos(self, nome, pts):
@@ -174,7 +170,7 @@ class MaratonaBot(discord.Client):
             await asyncio.sleep(30)
 
 # ==============================
-# 🎮 EXECUÇÃO
+# 🎮 COMANDOS
 # ==============================
 client = MaratonaBot()
 
@@ -188,7 +184,24 @@ async def on_message(message):
 
     if message.content == "!testar" and message.author.guild_permissions.administrator:
         canal = client.get_channel(CANAL_PRESENCA_ID)
-        client.lista_ativa = "Teste Manual"
-        client.participantes = {}
-        emb = discord.Embed(title="🧪 TESTE", description="Clique no botão!", color=0x00FFFF)
-        client.mensagem_lista = await canal.send(embed=
+        if canal:
+            client.lista_ativa = "Teste Manual"
+            client.participantes = {}
+            emb = discord.Embed(title="🧪 TESTE", description="Clique no botão!", color=0x00FFFF)
+            client.mensagem_lista = await canal.send(embed=emb, view=PresencaView(client))
+        else:
+            await message.channel.send("❌ Canal de presença não encontrado.")
+
+    if message.content == "!ranking":
+        try:
+            conn = await asyncpg.connect(DATABASE_URL)
+            rows = await conn.fetch("SELECT nick, pontos FROM ranking ORDER BY pontos DESC LIMIT 20")
+            await conn.close()
+            emb = discord.Embed(title="🏆 RANKING", color=0xFFD700)
+            txt = "\n".join([f"**{i+1}º** {r['nick']} — `{r['pontos']} pts`" for i, r in enumerate(rows)]) if rows else "Vazio"
+            emb.description = txt
+            await message.channel.send(embed=emb)
+        except Exception as e:
+            await message.channel.send(f"Erro ao ler ranking: {e}")
+
+client.run(TOKEN)
