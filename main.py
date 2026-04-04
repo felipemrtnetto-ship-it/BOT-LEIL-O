@@ -12,21 +12,20 @@ from dotenv import load_dotenv
 # ==============================
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-RAW_DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Correção Crítica para o asyncpg (DSN Validation)
-if not RAW_DATABASE_URL:
-    raise ValueError("ERRO: A variável DATABASE_URL não foi encontrada nas Variables do Railway!")
-
-if RAW_DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = RAW_DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Verificação de segurança para o log do Railway
+if not DATABASE_URL:
+    print("❌ ERRO: A variável DATABASE_URL está vazia no painel do Railway!")
 else:
-    DATABASE_URL = RAW_DATABASE_URL
+    # Garante que o esquema seja postgresql://
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 CANAL_PRESENCA_ID = 1423485053127753748
 CANAL_PONTOS_ID = 1423485889010602076
-CANAL_LOGS_ID = 1489805148204040312  # ID Atualizado
+CANAL_LOGS_ID = 1489805148204040312
 
 # Lista de Eventos
 eventos = [
@@ -51,18 +50,22 @@ eventos = [
 # 🗄️ BANCO DE DADOS (POSTGRES)
 # ==============================
 async def init_db():
-    conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute('''
-        CREATE TABLE IF NOT EXISTS ranking (
-            user_id BIGINT PRIMARY KEY,
-            nick TEXT,
-            pontos INTEGER DEFAULT 0
-        )
-    ''')
-    await conn.close()
+    try:
+        conn = await asyncpg.connect(DATABASE_URL)
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS ranking (
+                user_id BIGINT PRIMARY KEY,
+                nick TEXT,
+                pontos INTEGER DEFAULT 0
+            )
+        ''')
+        await conn.close()
+        print("✅ Banco de Dados conectado e tabela verificada!")
+    except Exception as e:
+        print(f"❌ Erro ao conectar no Banco: {e}")
 
 # ==============================
-# 🔘 INTERFACE (SISTEMA DE BOTÃO)
+# 🔘 INTERFACE (BOTÃO)
 # ==============================
 class PresencaView(View):
     def __init__(self, bot):
@@ -85,7 +88,7 @@ class PresencaView(View):
         await interaction.response.send_message(f"✅ Presença confirmada como **{nick}**!", ephemeral=True)
 
 # ==============================
-# 🤖 BOT CLIENT PRINCIPAL
+# 🤖 BOT CLIENT
 # ==============================
 class MaratonaBot(discord.Client):
     def __init__(self):
@@ -111,7 +114,7 @@ class MaratonaBot(discord.Client):
             txt = "\n".join([f"• {n}" for n in self.participantes.values()])
             embed = discord.Embed(
                 title=f"📋 LISTA: {self.lista_ativa}",
-                description=f"Clique no botão abaixo!\n\n**Participantes ({len(self.participantes)}):**\n{txt}",
+                description=f"Clique no botão para participar!\n\n**Participantes ({len(self.participantes)}):**\n{txt}",
                 color=0x2ecc71
             )
             try: await self.mensagem_lista.edit(embed=embed, view=PresencaView(self))
@@ -119,23 +122,21 @@ class MaratonaBot(discord.Client):
 
     async def distribuir_pontos(self, nome, pontos):
         if not self.participantes:
-            await self.log_auditoria("⚠️ Lista Vazia", f"O evento **{nome}** encerrou sem ninguém.")
+            await self.log_auditoria("⚠️ Lista Vazia", f"Evento **{nome}** sem participantes.")
             self.lista_ativa = None; return
 
-        conn = await asyncpg.connect(DATABASE_URL)
         try:
+            conn = await asyncpg.connect(DATABASE_URL)
             for uid, nick in self.participantes.items():
                 await conn.execute('''
                     INSERT INTO ranking (user_id, nick, pontos) VALUES ($1, $2, $3)
                     ON CONFLICT (user_id) DO UPDATE SET pontos = ranking.pontos + $3, nick = $2
                 ''', uid, nick, pontos)
-            
-            await self.log_auditoria("💰 Pontos Pagos", f"Evento: **{nome}**\nPlayers: {len(self.participantes)}\nPts: +{pontos}", 0x27ae60)
-        finally:
             await conn.close()
-            if self.mensagem_lista:
-                try: await self.mensagem_lista.delete()
-                except: pass
+            await self.log_auditoria("💰 Pontos Pagos", f"Evento: **{nome}**\nPlayers: {len(self.participantes)}\nPts: +{pontos}", 0x27ae60)
+        except Exception as e:
+            print(f"Erro ao distribuir pontos: {e}")
+        finally:
             self.participantes = {}; self.lista_ativa = None; self.alerta_enviado = False
 
     async def scheduler(self):
@@ -153,9 +154,7 @@ class MaratonaBot(discord.Client):
                     if ev_hoje < now - timedelta(hours=1): ev_hoje += timedelta(days=1)
                     if dias and now.weekday() not in dias: continue
 
-                    abrir = ev_hoje - timedelta(minutes=5)
-                    alerta = ev_hoje + timedelta(minutes=5)
-                    fechar = ev_hoje + timedelta(minutes=10)
+                    abrir, fechar = ev_hoje - timedelta(minutes=5), ev_hoje + timedelta(minutes=10)
 
                     if abrir <= now <= abrir + timedelta(seconds=45) and not self.lista_ativa:
                         self.lista_ativa = nome
@@ -163,19 +162,11 @@ class MaratonaBot(discord.Client):
                         embed = discord.Embed(title=f"{emoji} LISTA ABERTA: {nome}", description="Clique no botão abaixo!", color=0x00FF00)
                         self.mensagem_lista = await canal_presenca.send(content="@everyone", embed=embed, view=PresencaView(self))
 
-                    if alerta <= now <= alerta + timedelta(seconds=45) and self.lista_ativa == nome and not self.alerta_enviado:
-                        self.alerta_enviado = True
-                        await canal_presenca.send(f"⚠️ **ATENÇÃO** - A lista de **{nome}** fecha em 5 minutos!")
-
                     if fechar <= now <= fechar + timedelta(seconds=45) and self.lista_ativa == nome:
                         await self.distribuir_pontos(nome, pts)
-            except Exception as e:
-                print(f"Erro no scheduler: {e}")
+            except Exception as e: print(f"Erro no scheduler: {e}")
             await asyncio.sleep(40)
 
-# ==============================
-# 🎮 COMANDOS
-# ==============================
 client = MaratonaBot()
 
 @client.event
@@ -185,22 +176,11 @@ async def on_ready():
 @client.event
 async def on_message(message):
     if message.author.bot: return
-
     if message.content == "!ranking":
         conn = await asyncpg.connect(DATABASE_URL)
         rows = await conn.fetch("SELECT nick, pontos FROM ranking ORDER BY pontos DESC LIMIT 25")
         await conn.close()
-        if not rows: return await message.channel.send("📭 Ranking vazio.")
-        
-        embed = discord.Embed(title="🏆 RANKING GERAL", color=0xFFD700)
-        txt = "\n".join([f"**{i+1}º** {r['nick']} — `{r['pontos']} pts`" for i, r in enumerate(rows)])
-        embed.description = txt
+        embed = discord.Embed(title="🏆 RANKING", description="\n".join([f"**{i+1}º** {r['nick']} — `{r['pontos']} pts`" for i, r in enumerate(rows)]) if rows else "Vazio", color=0xFFD700)
         await message.channel.send(embed=embed)
-
-    if message.content == "!testar_lista" and message.author.guild_permissions.administrator:
-        client.lista_ativa = "Teste Manual"
-        client.participantes = {}
-        embed = discord.Embed(title="🧪 TESTE", description="Clique no botão!", color=0x00FFFF)
-        client.mensagem_lista = await message.channel.send(embed=embed, view=PresencaView(client))
 
 client.run(TOKEN)
